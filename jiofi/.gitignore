@@ -1,0 +1,8 @@
+# Raw HTML files from device
+html/
+
+# Additional device specific information
+jiofi-info.txt
+
+# Executable
+jiofi-info
