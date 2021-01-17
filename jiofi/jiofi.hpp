@@ -16,8 +16,15 @@ using result_map = std::map<std::string, std::string>;
 /*
  * parse_csv: Parse CSV string and returns as list
  */
-std::vector<std::string> parse_csv(const std::string datastring) {
+std::vector<std::string> parse_csv(const std::string inputstring) {
+    std::string datastring = inputstring;
     std::vector<std::string> parse_result;
+
+    // strip away any new line characters
+    datastring.erase(
+        std::remove(datastring.begin(), datastring.end(), '\n'),
+        datastring.end()
+    );
     
     auto string_left = datastring;
     auto delim_pos = string_left.find(",");

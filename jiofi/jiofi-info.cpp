@@ -3,50 +3,101 @@
  */
 
 #include <iostream>
-#include <map>
+#include <chrono>
+#include <thread>
+#include <signal.h>
+#include <mqtt/async_client.h>
 
 #include "jiofi.hpp"
+
+// Exit clean using CTRL+C
+volatile sig_atomic_t stop;
+
+// Callback for handling interrupts
+void cb_int_handler(int signum) {
+    stop = 1;
+}
 
 int main(int argc, char *argv[]) {
 
     JioFi m2;
 
-    auto r_lte = m2.lte_status();
-    std::cout << "=== LTE Status ===\n";
-    for(auto k: r_lte) {
-        std::cout << k.first << "    "
-            << k.second << "\n";
-    }
-    std::cout << "------------------" << std::endl;
+    // MQTT messaging
+    const std::string broker { "tcp://localhost:1883" };
+    const std::string client_id { "jiofi-bridge" };
+    const std::string root_topic { "home/devices/jiofi" };
 
-    auto r_lan = m2.lan_info();
-    std::cout << "=== LAN Info ===\n";
-    for(auto k: r_lan) {
-        std::cout << k.first << "    " << k.second << "\n";
-    }
-    std::cout << "----------------" << std::endl;
+    // create an async client
+    mqtt::async_client jiofi_bridge(broker, client_id);
 
-    auto r_wan = m2.wan_info();
-    std::cout << "=== WAN Info ===\n";
-    for(auto k: r_wan) {
-        std::cout << k.first << "    " << k.second << "\n";
-    }
-    std::cout << "----------------" << std::endl;
+    // install interrupt handler
+    signal(SIGINT, cb_int_handler);
 
-    auto r_dev = m2.dev_details();
-    std::cout << "=== Device Details ===\n";
-    for(auto k: r_dev) {
-        std::cout << k.first << "    " << k.second << "\n";
-    }
-    std::cout << "----------------------" << std::endl;
+    try {
 
-    auto r_sys = m2.sys_perf();
-    std::cout << "=== System Performance ===\n";
-    for(auto k: r_sys) {
-        std::cout << k.first << "    " << k.second << "\n";
-    }
-    std::cout << "--------------------------" << std::endl;
+        std::cerr << "Connecting to broker " << broker << " ... ";
+        jiofi_bridge.connect()->wait();
+        std::cerr << "[DONE]" << std::endl;
+        std::string cli_id = jiofi_bridge.get_client_id();
+        mqtt::token_ptr tok;
 
+        while(!stop) {
+            // mark start of this loop
+            auto ts_now = std::chrono::system_clock::now();
+            auto ts_next = ts_now + std::chrono::seconds(30);
+
+            // send each of the status messages
+            for(auto t: m2.lte_status()) {
+                tok = jiofi_bridge.publish(
+                    root_topic + "/lte_status/" + t.first, 
+                    t.second
+                );
+            }
+
+            for(auto t: m2.lan_info()) {
+                tok = jiofi_bridge.publish(
+                    root_topic + "/lan_info/" + t.first,
+                    t.second
+                );
+            }
+
+            for(auto t: m2.wan_info()) {
+                tok = jiofi_bridge.publish(
+                    root_topic + "/wan_info/" + t.first,
+                    t.second
+                );
+            }
+
+            for(auto t: m2.dev_details()) {
+                tok = jiofi_bridge.publish(
+                    root_topic + "/dev_details/" + t.first,
+                    t.second
+                );
+            }
+
+            for(auto t: m2.sys_perf()) {
+                tok = jiofi_bridge.publish(
+                    root_topic + "/sys_perf/" + t.first,
+                    t.second
+                );
+            }
+
+            // wait for sending!
+            // tok->wait();
+
+            // wait untill the period ends
+            std::this_thread::sleep_until(ts_next);
+        }
+
+        std::cerr << "Disconnecting from broker ... ";
+        jiofi_bridge.disconnect()->wait();
+        std::cerr << "[DONE]" << std::endl;
+        
+    }
+    catch (const mqtt::exception& exc) {
+        std::cerr << exc << std::endl;
+        return 1;
+    }
 
     return 0;
 }
